@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.SignalR;
+using System;
 using System.Collections.Concurrent;
 using TypeRacer.Application.Helper;
+using TypeRacer.Domain.DTOs;
 
 namespace TypeRacer.Application.Hubs
 {
@@ -15,17 +17,27 @@ namespace TypeRacer.Application.Hubs
 
         public async Task JoinRandomRoom(string username)
         {
-            var roomId = _roomManager.AddPlayer(Context.ConnectionId);
-            await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+            string? roomId = _roomManager.AddPlayer(Context.ConnectionId, username);
 
-            // Notify all in room about new player
-            var players = _roomManager.GetPlayersInRoom(roomId);
-            await Clients.Group(roomId).SendAsync("PlayerJoined", username, players, roomId, "","","","","","","");
 
-            if (players != null && players.Count == RoomManager.MaxPlayersPerRoom)
+            if (string.IsNullOrEmpty(roomId))
             {
-                await Clients.Group(roomId).SendAsync("StartCompetition", username, players);
+                return;
             }
+            List<UserDTO> players = _roomManager.GetPlayersInRoom(roomId);
+
+            for (int i = 0; i < players.Count; i++)
+            {
+                await Groups.AddToGroupAsync(players[i].ConnectionId, roomId);
+            }
+
+            await Clients.Group(roomId).SendAsync("PlayerJoined", username, players, roomId);
+            await Clients.Group(roomId).SendAsync("StartCompetition", players);
+            // Notify all in room about new player
+
+            //if (players != null && players.Count == RoomManager.ExactPlayersPerRoom)
+            //{
+            //}
         }
 
         public async Task UpdateProgress(string roomId, string username, int progress, int wpm)
@@ -35,7 +47,12 @@ namespace TypeRacer.Application.Hubs
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            _roomManager.RemovePlayer(Context.ConnectionId);
+            string? roomKey = _roomManager.RemovePlayer(Context.ConnectionId);
+
+            if (!string.IsNullOrEmpty(roomKey))
+            {
+                await Clients.Group(roomKey).SendAsync("PlayerLeft", Context.ConnectionId);
+            }
             await base.OnDisconnectedAsync(exception);
         }
 
